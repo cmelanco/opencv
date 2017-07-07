@@ -97,11 +97,11 @@ namespace pyrlk
     {
         static __device__ __forceinline__ float read(float x, float y)
         {
-            return tex2D(tex_I8U, x, y);
+            return 0.0;
         }
         static __host__ __forceinline__ void bindTexture_(PtrStepSz<uchar>& I)
         {
-            bindTexture(&tex_I8U, I);
+            (void)I;
         }
     };
     template <> struct Tex_I<1, ushort>
@@ -764,6 +764,39 @@ namespace pyrlk
             else
                 sparseKernel<cn, PATCH_X, PATCH_Y, false, T> <<<grid, block, 0, stream >>>(prevPts, nextPts, status, err, level, rows, cols);
 
+            cudaSafeCall(cudaGetLastError());
+
+            if (stream == 0)
+                cudaSafeCall(cudaDeviceSynchronize());
+        }
+    };
+    // Specialization for unsigned char because the texture path keeps failing
+    template<int PATCH_X, int PATCH_Y> class sparse_caller<1, PATCH_X, PATCH_Y, unsigned char>
+    {
+    public:
+        typedef typename TypeVec<unsigned char, 1>::vec_type work_type;
+        typedef PtrStepSz<work_type> Ptr2D;
+        typedef BrdConstant<work_type> BrdType;
+        typedef BorderReader<Ptr2D, BrdType> Reader;
+        typedef LinearFilter<Reader> Filter;
+        static void call(Ptr2D I, Ptr2D J, int rows, int cols, const float2* prevPts, float2* nextPts, uchar* status, float* err, int ptcount,
+            int level, dim3 block, cudaStream_t stream)
+        {
+            dim3 grid(ptcount);
+            if (level == 0 && err)
+            {
+                sparseKernel_<PATCH_X, PATCH_Y, true, 1, unsigned char> <<<grid, block, 0, stream >>>(
+                    Filter(Reader(I, BrdType(rows, cols))),
+                    Filter(Reader(J, BrdType(rows, cols))),
+                    prevPts, nextPts, status, err, level, rows, cols);
+            }
+            else
+            {
+                sparseKernel_<PATCH_X, PATCH_Y, false, 1, unsigned char> <<<grid, block, 0, stream >>>(
+                    Filter(Reader(I, BrdType(rows, cols))),
+                    Filter(Reader(J, BrdType(rows, cols))),
+                    prevPts, nextPts, status, err, level, rows, cols);
+            }
             cudaSafeCall(cudaGetLastError());
 
             if (stream == 0)
